@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 # 4. 파이썬 부품(requirements.txt) 복사 및 설치
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install flash-attn --no-build-isolation
 
 # 5. 우리가 만든 심장 엔진 복사
 COPY handler.py .
