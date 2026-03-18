@@ -1,34 +1,71 @@
 import runpod
+import base64
+import urllib.request
+import io
 import torch
-# 여기에 기존에 쓰시던 Qwen 모델 로드 라이브러리를 넣으시면 됩니다.
+import soundfile as sf
+from qwen_tts import Qwen3TTSModel
+import traceback
 
-# 1. 컨테이너가 켜질 때 딱 한 번 실행되는 구역 (Cold Start)
-print("🚀 [Cold Start] AI 모델을 메모리에 적재합니다...")
-# model = ... (기존 모델 로드 코드)
-print("✅ 준비 완료! n8n의 명령을 기다립니다.")
+print("🚀 [Cold Start] Qwen3-TTS 모델 로딩 중...")
+# 1.7B Base 모델 로드 (Zero-shot Voice Cloning용)
+# RTX A6000 등 고성능 GPU의 Flash Attention을 활용해 최고 속도를 냅니다.
+model = Qwen3TTSModel.from_pretrained(
+    "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    device_map="cuda:0",
+    dtype=torch.bfloat16,
+    attn_implementation="flash_attention_2"
+)
+print("✅ Qwen3-TTS 로딩 완료! n8n의 명령을 기다립니다.")
 
-# 2. n8n에서 API를 쏠 때마다 실행되는 핵심 함수
 def generate_audio(job):
-    # n8n이 JSON으로 보낸 데이터는 job["input"] 안에 들어옵니다.
-    job_input = job["input"]
-    text = job_input.get("text", "")
-    reference_text = job_input.get("reference_text", "")
+    req = job["input"]
     
-    print(f"📥 [명령 수신] 대본: {text[:20]}...")
+    text = req.get("text", "")
+    reference_text = req.get("reference_text", "")
+    reference_audio_url = req.get("reference_audio", "")
+    language = req.get("language", "auto")
+    
+    print(f"📥 [작업 수신] 대본: {text[:20]}...")
     
     try:
-        # --------------------------------------------------------
-        # 여기에 기존에 쓰시던 오디오 렌더링(추론) 코드를 넣습니다.
-        # 예: output_audio = model.generate(text, reference_text)
-        # --------------------------------------------------------
+        # 1. n8n이 넘겨준 레퍼런스 오디오(URL)를 임시 폴더에 다운로드
+        prompt_audio_path = "/tmp/temp_ref.wav"
         
+        # 봇 차단(403 에러) 방지를 위한 헤더 추가
+        header = {'User-Agent': 'Mozilla/5.0'}
+        request = urllib.request.Request(reference_audio_url, headers=header)
+        with urllib.request.urlopen(request) as response, open(prompt_audio_path, 'wb') as out_file:
+            out_file.write(response.read())
+            
+        print("🎙️ 레퍼런스 오디오 다운로드 완료. 음성 복제(추론)를 시작합니다...")
+        
+        # 2. Qwen-TTS 실제 음성 생성 로직
+        wavs, sr = model.generate_voice_clone(
+            text=text,
+            language=language,
+            ref_audio=prompt_audio_path,
+            ref_text=reference_text
+        )
+        
+        # 3. [서버리스 핵심] 완성된 오디오를 하드디스크에 저장하지 않고, 
+        # 곧바로 메모리에서 Base64 텍스트로 압축하여 n8n에 빛의 속도로 쏩니다.
+        buffer = io.BytesIO()
+        sf.write(buffer, wavs[0], sr, format='WAV')
+        buffer.seek(0)
+        audio_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+        
+        print("✨ 렌더링 및 Base64 변환 성공!")
         return {
             "status": "success",
             "message": "서버리스 렌더링 완료!",
-            # "audio_url": "..." (결과물 링크 또는 Base64 데이터)
+            "audio_base64": audio_base64
         }
+        
     except Exception as e:
+        print(f"❌ 렌더링 중 에러 발생: {e}")
+        traceback.print_exc()
         return {"error": str(e)}
 
-# 3. RunPod 서버리스 시작 명령어
+# RunPod 서버리스 엔진 가동
 runpod.serverless.start({"handler": generate_audio})
