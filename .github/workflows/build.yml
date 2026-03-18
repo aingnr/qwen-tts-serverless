@@ -1,0 +1,32 @@
+name: Build and Push Docker Image
+
+# 코드가 수정(push)될 때마다 로봇이 알아서 작동하도록 하는 트리거
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest # 로봇이 작업할 가상의 우분투 컴퓨터
+
+    steps:
+      # 1. 우리 저장소의 설계도(파일)들을 복사해옵니다.
+      - name: Check out the repo
+        uses: actions/checkout@v3
+
+      # 2. 아까 세팅한 열쇠로 Docker Hub에 로그인합니다.
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 3. 도커 이미지를 구워서 Docker Hub 창고로 쏘아 올립니다!
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          # 저장될 창고 위치와 이름 설정
+          tags: wizardpark/qwen-tts-serverless:latest
