@@ -1,7 +1,5 @@
 runpod
-fastapi
-uvicorn
 transformers
 accelerate
-torch
 torchaudio
+qwen-tts
