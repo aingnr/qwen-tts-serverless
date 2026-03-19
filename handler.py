@@ -57,9 +57,8 @@ def generate_audio(job):
         
         print("✨ 렌더링 및 Base64 변환 성공!")
         return {
-            "status": "success",
-            "message": "서버리스 렌더링 완료!",
-            "audio_base64": audio_base64
+            "status": "COMPLETED",
+            "audio_base64": audio_base64  # 다른 잡다한 정보 빼고 이것만 깔끔하게 보냄
         }
         
     except Exception as e:
