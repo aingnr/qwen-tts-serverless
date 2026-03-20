@@ -72,10 +72,17 @@ def generate_audio(job):
         return {"error": str(e)}
         
     finally:
-        # 🌟 [매우 중요] 작업이 성공하든 실패하든, 썼던 쓰레기(임시 파일)는 무조건 청소합니다!
+        # 1. 쓰레기 파일(임시 레퍼런스) 청소
         if os.path.exists(prompt_audio_path):
             os.remove(prompt_audio_path)
             print(f"🧹 임시 레퍼런스 파일 청소 완료: {prompt_audio_path}")
+
+        # 2. 🌟 [완전 자동화 핵심] GPU 메모리 찌꺼기 강제 소각 (기절 방지)
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            print("🚿 GPU VRAM 메모리 강제 초기화 완료! (다음 요리 준비 끝)")
 
 # RunPod 서버리스 엔진 가동
 runpod.serverless.start({"handler": generate_audio})
