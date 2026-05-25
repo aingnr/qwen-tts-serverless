@@ -29,16 +29,24 @@ RUN pip install --no-cache-dir --force-reinstall \
     --index-url https://download.pytorch.org/whl/cu124
 
 # ── Pre-download Model (빌드 타임 베이크 → 콜드스타트 최소화) ─────────────────
-# Voice Clone = Base 모델 + Tokenizer 두 가지 모두 필요
+# ✅ qwen-tts 패키지의 from_pretrained 으로 직접 다운로드
+#    → speech_tokenizer 포함 모든 파일이 올바른 경로에 배치됨
+#    → snapshot_download 로 별도 받으면 speech_tokenizer 경로가 어긋나 로딩 실패함
 ENV HF_HOME=/app/models
 
 RUN python -c "\
-from huggingface_hub import snapshot_download; \
-print('[Download] Qwen3-TTS-Tokenizer-12Hz...'); \
-snapshot_download('Qwen/Qwen3-TTS-Tokenizer-12Hz', cache_dir='/app/models'); \
-print('[Download] Qwen3-TTS-12Hz-1.7B-Base...'); \
-snapshot_download('Qwen/Qwen3-TTS-12Hz-1.7B-Base', cache_dir='/app/models'); \
-print('[Download] Complete.')"
+import os; \
+os.environ['HF_HOME'] = '/app/models'; \
+import torch; \
+from qwen_tts import Qwen3TTSModel; \
+print('[Download] Qwen3-TTS-12Hz-1.7B-Base (qwen-tts 패키지로 다운로드)...'); \
+model = Qwen3TTSModel.from_pretrained( \
+    'Qwen/Qwen3-TTS-12Hz-1.7B-Base', \
+    device_map='cpu', \
+    dtype=torch.float32, \
+); \
+print('[Download] Complete. speech_tokenizer 포함 전체 다운로드 완료.'); \
+del model"
 
 # ── Reference Audio Files (채널별 .wav — URL 폴백용 로컬 복사) ───────────────
 # generate_voice_clone()은 URL 직접 지원하므로 로컬 파일은 폴백 전용
