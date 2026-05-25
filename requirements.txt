@@ -4,3 +4,7 @@ accelerate
 torchaudio
 qwen-tts
 soundfile
+einops
+librosa
+onnxruntime
+sox
