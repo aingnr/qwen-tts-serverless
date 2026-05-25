@@ -1,10 +1,24 @@
-runpod
-transformers
-accelerate
-torchaudio
+# ── RunPod ───────────────────────────────────────────────────────────────────
+runpod>=1.7.0
+
+# ── Qwen3-TTS 공식 패키지 ─────────────────────────────────────────────────────
+# ref: https://github.com/QwenLM/Qwen3-TTS → pip install -U qwen-tts
+# ⚠️ qwen-tts 설치 시 torch 버전 충돌 가능
+#    → Dockerfile Step 3에서 torch 강제 복원으로 처리
 qwen-tts
-soundfile
-einops
-librosa
-onnxruntime
-sox
+
+# ── qwen-tts 의존 패키지 (명시적 선언) ───────────────────────────────────────
+transformers>=4.51.0
+accelerate>=0.30.0
+einops>=0.7.0
+huggingface_hub>=0.23.0
+
+# ── 오디오 처리 ───────────────────────────────────────────────────────────────
+soundfile>=0.12.1
+numpy>=1.24.0
+
+# ── flash-attn ───────────────────────────────────────────────────────────────
+# 공식 예제(test_model_12hz_base.py)에서 flash_attention_2 사용
+# Dockerfile에서 --no-build-isolation 으로 별도 설치
+# handler.py에서 실패 시 sdpa 자동 폴백 처리
+# flash-attn  ← Dockerfile RUN 에서 직접 설치
