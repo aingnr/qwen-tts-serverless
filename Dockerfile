@@ -6,12 +6,13 @@ RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 
-# ✅ 핵심: torch를 먼저 고정 설치 후, 나머지 설치
-RUN pip install --no-cache-dir \
+# 1. 먼저 qwen-tts 등 나머지 패키지 설치 (torch 덮어써도 OK)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 2. 마지막에 torch를 강제로 올바른 버전으로 덮어씌우기 ✅
+RUN pip install --no-cache-dir --force-reinstall \
     torch==2.4.1 torchvision torchaudio \
     --index-url https://download.pytorch.org/whl/cu124
-
-RUN pip install --no-cache-dir -r requirements.txt
 
 COPY handler.py .
 COPY *.wav .
