@@ -4,7 +4,7 @@ WORKDIR /workspace
 
 RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
-# 1. torch 관련 패키지를 먼저 올바른 버전으로 설치
+# 1. torch 관련 패키지를 먼저 올바른 버전으로  설치
 RUN pip install --no-cache-dir \
     torch==2.4.1 torchaudio torchvision \
     --index-url https://download.pytorch.org/whl/cu124
