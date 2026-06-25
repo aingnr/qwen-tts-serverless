@@ -4,7 +4,6 @@ import urllib.request
 import io
 import torch
 import numpy as np
-import librosa
 import soundfile as sf
 from qwen_tts import Qwen3TTSModel
 import traceback
@@ -37,13 +36,13 @@ def get_reference_audio(url: str) -> str:
 
         # ─────────────────────────────────────────────
         # [FIX 4] 레퍼런스 오디오 클리핑 자동 정규화
-        # peak > 1.0 감지 시 0.95 기준으로 정규화 후 덮어쓰기
-        # → Qwen3-TTS WARNING 제거 + Voice Clone 기준점 안정화
+        # soundfile로 원본 포맷(Stereo·샘플레이트) 그대로 읽기
+        # peak > 1.0 감지 시 0.95 기준 정규화 후 동일 포맷으로 덮어쓰기
         # ─────────────────────────────────────────────
-        audio, sr = librosa.load(path, sr=None, mono=True)
+        audio, sr = sf.read(path)   # 원본 포맷 완전 보존 (Stereo 유지)
         peak = np.max(np.abs(audio))
         if peak > 1.0:
-            audio = audio / peak * 0.95
+            audio = (audio / peak * 0.95).astype(np.float32)
             sf.write(path, audio, sr)
             print(f"⚠️ 레퍼런스 오디오 클리핑 감지 → 정규화 적용 (peak: {peak:.4f})")
 
