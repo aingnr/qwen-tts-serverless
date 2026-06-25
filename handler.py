@@ -33,19 +33,6 @@ def get_reference_audio(url: str) -> str:
         req = urllib.request.Request(url, headers=header)
         with urllib.request.urlopen(req) as resp, open(path, "wb") as f:
             f.write(resp.read())
-
-        # ─────────────────────────────────────────────
-        # [FIX 4] 레퍼런스 오디오 클리핑 자동 정규화
-        # soundfile로 원본 포맷(Stereo·샘플레이트) 그대로 읽기
-        # peak > 1.0 감지 시 0.95 기준 정규화 후 동일 포맷으로 덮어쓰기
-        # ─────────────────────────────────────────────
-        audio, sr = sf.read(path)   # 원본 포맷 완전 보존 (Stereo 유지)
-        peak = np.max(np.abs(audio))
-        if peak > 1.0:
-            audio = (audio / peak * 0.95).astype(np.float32)
-            sf.write(path, audio, sr)
-            print(f"⚠️ 레퍼런스 오디오 클리핑 감지 → 정규화 적용 (peak: {peak:.4f})")
-
         REF_AUDIO_CACHE[url] = path
         print(f"📥 레퍼런스 오디오 캐싱 완료: {path}")
     else:
