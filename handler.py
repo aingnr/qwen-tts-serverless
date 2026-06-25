@@ -1,34 +1,10 @@
-# ═══════════════════════════════════════════════════════════════
-# handler.py — Qwen3-TTS RunPod Serverless Handler
-# Version : v2.0
-# Updated : 2026-06-25
-# Author  : Wizard + Thor
-#
-# ▣ 이 버전의 수정 목적: 청크별 음질 불일치 문제 해결
-#
-# [FIX 1] 레퍼런스 오디오 전역 캐싱 (get_reference_audio)
-#   - 문제: 청크마다 레퍼런스 오디오를 URL에서 재다운로드
-#           → 네트워크 편차·파일 손상으로 Voice Clone 기준점이 흔들림
-#   - 해결: Cold Start 시 최초 1회만 다운로드 후 메모리에 캐싱
-#           동일 URL 재요청 시 캐시 히트로 즉시 반환
-#
-# [FIX 2] Peak Normalization (normalize_audio)
-#   - 문제: 청크별 볼륨(RMS/Peak)이 달라 이어붙이면 음량 편차가 들림
-#   - 해결: 모든 청크 오디오를 Peak 0.95 기준으로 정규화 후 인코딩
-#
-# [FIX 3] 추론 Seed 고정 (torch.manual_seed)
-#   - 문제: LLM 기반 TTS 특성상 매 추론마다 샘플링이 달라짐
-#           → 동일 레퍼런스·텍스트여도 청크마다 톤·속도·억양이 변동
-#   - 해결: 매 청크 추론 전 FIXED_SEED=42 고정
-#           CPU·CUDA 양쪽 seed 모두 세팅하여 완전한 결정론적 추론 보장
-# ═══════════════════════════════════════════════════════════════
-
 import runpod
 import base64
 import urllib.request
 import io
 import torch
 import numpy as np
+import librosa
 import soundfile as sf
 from qwen_tts import Qwen3TTSModel
 import traceback
@@ -58,6 +34,19 @@ def get_reference_audio(url: str) -> str:
         req = urllib.request.Request(url, headers=header)
         with urllib.request.urlopen(req) as resp, open(path, "wb") as f:
             f.write(resp.read())
+
+        # ─────────────────────────────────────────────
+        # [FIX 4] 레퍼런스 오디오 클리핑 자동 정규화
+        # peak > 1.0 감지 시 0.95 기준으로 정규화 후 덮어쓰기
+        # → Qwen3-TTS WARNING 제거 + Voice Clone 기준점 안정화
+        # ─────────────────────────────────────────────
+        audio, sr = librosa.load(path, sr=None, mono=True)
+        peak = np.max(np.abs(audio))
+        if peak > 1.0:
+            audio = audio / peak * 0.95
+            sf.write(path, audio, sr)
+            print(f"⚠️ 레퍼런스 오디오 클리핑 감지 → 정규화 적용 (peak: {peak:.4f})")
+
         REF_AUDIO_CACHE[url] = path
         print(f"📥 레퍼런스 오디오 캐싱 완료: {path}")
     else:
