@@ -5,6 +5,7 @@ import io
 import torch
 import numpy as np
 import soundfile as sf
+import librosa
 from qwen_tts import Qwen3TTSModel
 import traceback
 
@@ -52,6 +53,19 @@ def normalize_audio(audio: np.ndarray) -> np.ndarray:
     return audio
 
 
+# ─────────────────────────────────────────────
+# [FIX 4] 채널별 배속(Tempo) 조정
+# Master Config Sheet의 TTS_Tempo 값을 n8n이 전달 → 여기서 적용
+# rate < 1.0 → 느려짐 (숨가쁜 속도 문제 보정)
+# rate = 1.0 (기본값) → 변경 없음, 미설정 채널 안전장치
+# 실패 시 예외를 상위로 전파하여 error 처리 (Option A: 엄격 모드)
+# ─────────────────────────────────────────────
+def apply_tempo(audio: np.ndarray, tempo: float) -> np.ndarray:
+    if tempo == 1.0:
+        return audio
+    return librosa.effects.time_stretch(audio.astype(np.float32), rate=tempo)
+
+
 def generate_audio(job):
     req = job["input"]
 
@@ -59,8 +73,9 @@ def generate_audio(job):
     reference_text        = req.get("reference_text", "")
     reference_audio_url   = req.get("reference_audio", "")
     language              = req.get("language", "auto")
+    tempo                 = float(req.get("tempo", 1.0))
 
-    print(f"📥 [작업 수신] 대본: {text[:30]}...")
+    print(f"📥 [작업 수신] 대본: {text[:30]}... / tempo={tempo}")
 
     try:
         # ─────────────────────────────────────────────
@@ -84,8 +99,15 @@ def generate_audio(job):
             ref_text=reference_text
         )
 
+        audio = wavs[0]
+
+        # 배속 조정 (정규화보다 먼저 적용 — 스트레치 후 피크가 달라질 수 있으므로)
+        if tempo != 1.0:
+            print(f"🎚️ 배속 조정 적용: rate={tempo}")
+            audio = apply_tempo(audio, tempo)
+
         # 정규화 → Base64 인코딩
-        normalized = normalize_audio(wavs[0])
+        normalized = normalize_audio(audio)
 
         buffer = io.BytesIO()
         sf.write(buffer, normalized, sr, format="WAV")
