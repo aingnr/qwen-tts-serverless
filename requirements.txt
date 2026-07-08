@@ -4,4 +4,4 @@ accelerate
 torchaudio
 qwen-tts
 soundfile
-librosa
+pyrubberband
