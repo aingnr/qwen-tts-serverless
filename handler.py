@@ -5,7 +5,7 @@ import io
 import torch
 import numpy as np
 import soundfile as sf
-import librosa
+import pyrubberband as pyrb
 from qwen_tts import Qwen3TTSModel
 import traceback
 
@@ -54,16 +54,17 @@ def normalize_audio(audio: np.ndarray) -> np.ndarray:
 
 
 # ─────────────────────────────────────────────
-# [FIX 4] 채널별 배속(Tempo) 조정
-# Master Config Sheet의 TTS_Tempo 값을 n8n이 전달 → 여기서 적용
+# [FIX 4] 채널별 배속(Tempo) 조정 — Rubber Band (WSOLA 계열)
+# librosa의 Phase Vocoder 대비 금속성 울림(phasiness) 아티팩트가
+# 훨씬 적어 음성 콘텐츠에 적합. rubberband-cli 바이너리 필요(Dockerfile).
 # rate < 1.0 → 느려짐 (숨가쁜 속도 문제 보정)
 # rate = 1.0 (기본값) → 변경 없음, 미설정 채널 안전장치
 # 실패 시 예외를 상위로 전파하여 error 처리 (Option A: 엄격 모드)
 # ─────────────────────────────────────────────
-def apply_tempo(audio: np.ndarray, tempo: float) -> np.ndarray:
+def apply_tempo(audio: np.ndarray, sr: int, tempo: float) -> np.ndarray:
     if tempo == 1.0:
         return audio
-    return librosa.effects.time_stretch(audio.astype(np.float32), rate=tempo)
+    return pyrb.time_stretch(audio.astype(np.float32), sr, rate=tempo)
 
 
 def generate_audio(job):
@@ -103,8 +104,8 @@ def generate_audio(job):
 
         # 배속 조정 (정규화보다 먼저 적용 — 스트레치 후 피크가 달라질 수 있으므로)
         if tempo != 1.0:
-            print(f"🎚️ 배속 조정 적용: rate={tempo}")
-            audio = apply_tempo(audio, tempo)
+            print(f"🎚️ 배속 조정 적용 (Rubber Band): rate={tempo}")
+            audio = apply_tempo(audio, sr, tempo)
 
         # 정규화 → Base64 인코딩
         normalized = normalize_audio(audio)
