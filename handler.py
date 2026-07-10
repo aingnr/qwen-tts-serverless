@@ -55,34 +55,41 @@ def normalize_audio(audio: np.ndarray) -> np.ndarray:
 
 # ─────────────────────────────────────────────
 # [FIX 5] 청크 오디오 병합 (Merge)
-# Part_N_[ID].wav 파일명에서 숫자를 추출해 정렬 후,
+# Part_N_[ID].wav "파일명"에서 숫자를 추출해 정렬 후,
 # silence_gap(초) 만큼 무음을 사이에 넣어 이어붙임.
+# Google Drive 다운로드 URL(예: uc?export=download&id=...)에는
+# 파일명이 포함되지 않으므로, name과 url을 쌍으로 받아
+# name 기준으로 정렬하고 url로 다운로드한다.
 # 개별 청크는 재정규화하지 않고(이미 정규화된 상태),
 # 최종 병합본에만 한 번 더 peak normalize를 적용한다.
 # 샘플레이트 불일치·패턴 불일치 시 예외를 던져 A안(엄격) 처리.
 # ─────────────────────────────────────────────
-def extract_part_num(url: str) -> int:
-    m = re.search(r"Part_(\d+)_", url)
+def extract_part_num(name: str) -> int:
+    m = re.search(r"Part_(\d+)_", name)
     if not m:
-        raise ValueError(f"Part 번호를 파일명에서 찾을 수 없음: {url}")
+        raise ValueError(f"Part 번호를 파일명에서 찾을 수 없음: {name}")
     return int(m.group(1))
 
 
-def merge_chunks(chunk_urls: list, silence_gap: float = 0.5):
-    if not chunk_urls:
-        raise ValueError("chunk_urls가 비어 있습니다.")
+def merge_chunks(chunks: list, silence_gap: float = 0.5):
+    if not chunks:
+        raise ValueError("chunks가 비어 있습니다.")
 
-    sorted_urls = sorted(chunk_urls, key=extract_part_num)
+    for c in chunks:
+        if "name" not in c or "url" not in c:
+            raise ValueError(f"chunks 항목에 name/url이 없습니다: {c}")
+
+    sorted_chunks = sorted(chunks, key=lambda c: extract_part_num(c["name"]))
 
     segments = []
     sr_ref = None
-    for url in sorted_urls:
-        path = get_reference_audio(url)
+    for c in sorted_chunks:
+        path = get_reference_audio(c["url"])
         audio, sr = sf.read(path)
         if sr_ref is None:
             sr_ref = sr
         elif sr != sr_ref:
-            raise ValueError(f"샘플레이트 불일치: {url} ({sr} != {sr_ref})")
+            raise ValueError(f"샘플레이트 불일치: {c['name']} ({sr} != {sr_ref})")
         segments.append(audio)
 
     gap = np.zeros(int(silence_gap * sr_ref), dtype=segments[0].dtype)
@@ -101,12 +108,12 @@ def generate_audio(job):
     # MODE: merge — 청크 오디오 병합
     # ─────────────────────────────────────────────
     if mode == "merge":
-        chunk_urls = req.get("chunk_urls", [])
+        chunks = req.get("chunks", [])
         silence_gap = float(req.get("silence_gap", 0.5))
-        print(f"📥 [작업 수신] 병합 모드 / 청크 수={len(chunk_urls)} / silence_gap={silence_gap}s")
+        print(f"📥 [작업 수신] 병합 모드 / 청크 수={len(chunks)} / silence_gap={silence_gap}s")
 
         try:
-            merged_audio, sr = merge_chunks(chunk_urls, silence_gap)
+            merged_audio, sr = merge_chunks(chunks, silence_gap)
 
             # 최종 병합본 전체 피크 정규화 — 청크별 음량 편차 해소
             merged_audio = normalize_audio(merged_audio)
