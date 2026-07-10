@@ -2,8 +2,8 @@
 FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
 # 2. 작업 폴더 지정
 WORKDIR /workspace
-# 3. 오디오 처리에 필수인 ffmpeg, rubberband(고품질 배속 조절) 설치
-RUN apt-get update && apt-get install -y ffmpeg rubberband-cli && rm -rf /var/lib/apt/lists/*
+# 3. 오디오 처리에 필수인 ffmpeg 설치
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 # 4. 파이썬 부품(requirements.txt) 복사 및 설치
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
