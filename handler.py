@@ -1,11 +1,11 @@
 import runpod
 import base64
+import re
 import urllib.request
 import io
 import torch
 import numpy as np
 import soundfile as sf
-import pyrubberband as pyrb
 from qwen_tts import Qwen3TTSModel
 import traceback
 
@@ -21,9 +21,9 @@ model = Qwen3TTSModel.from_pretrained(
 print("✅ Qwen3-TTS 로딩 완료! n8n의 명령을 기다립니다.")
 
 # ─────────────────────────────────────────────
-# [FIX 1] 레퍼런스 오디오 전역 캐시
+# [FIX 1] 레퍼런스/청크 오디오 전역 캐시
 # Cold Start 이후 동일 URL은 재다운로드하지 않음
-# → 청크마다 네트워크 편차·파일 손상 위험 제거
+# → voice_clone의 레퍼런스 오디오, merge의 청크 오디오 공용 재사용
 # ─────────────────────────────────────────────
 REF_AUDIO_CACHE = {}
 
@@ -35,15 +35,15 @@ def get_reference_audio(url: str) -> str:
         with urllib.request.urlopen(req) as resp, open(path, "wb") as f:
             f.write(resp.read())
         REF_AUDIO_CACHE[url] = path
-        print(f"📥 레퍼런스 오디오 캐싱 완료: {path}")
+        print(f"📥 오디오 캐싱 완료: {path}")
     else:
-        print(f"✅ 레퍼런스 오디오 캐시 히트: {REF_AUDIO_CACHE[url]}")
+        print(f"✅ 오디오 캐시 히트: {REF_AUDIO_CACHE[url]}")
     return REF_AUDIO_CACHE[url]
 
 
 # ─────────────────────────────────────────────
 # [FIX 2] Peak Normalization
-# 청크별 볼륨 편차를 제거하여 이어붙일 때 균일한 음량 보장
+# 청크별/병합본 볼륨 편차를 제거하여 균일한 음량 보장
 # ─────────────────────────────────────────────
 def normalize_audio(audio: np.ndarray) -> np.ndarray:
     audio = audio.astype(np.float32)
@@ -54,29 +54,89 @@ def normalize_audio(audio: np.ndarray) -> np.ndarray:
 
 
 # ─────────────────────────────────────────────
-# [FIX 4] 채널별 배속(Tempo) 조정 — Rubber Band (WSOLA 계열)
-# librosa의 Phase Vocoder 대비 금속성 울림(phasiness) 아티팩트가
-# 훨씬 적어 음성 콘텐츠에 적합. rubberband-cli 바이너리 필요(Dockerfile).
-# rate < 1.0 → 느려짐 (숨가쁜 속도 문제 보정)
-# rate = 1.0 (기본값) → 변경 없음, 미설정 채널 안전장치
-# 실패 시 예외를 상위로 전파하여 error 처리 (Option A: 엄격 모드)
+# [FIX 5] 청크 오디오 병합 (Merge)
+# Part_N_[ID].wav 파일명에서 숫자를 추출해 정렬 후,
+# silence_gap(초) 만큼 무음을 사이에 넣어 이어붙임.
+# 개별 청크는 재정규화하지 않고(이미 정규화된 상태),
+# 최종 병합본에만 한 번 더 peak normalize를 적용한다.
+# 샘플레이트 불일치·패턴 불일치 시 예외를 던져 A안(엄격) 처리.
 # ─────────────────────────────────────────────
-def apply_tempo(audio: np.ndarray, sr: int, tempo: float) -> np.ndarray:
-    if tempo == 1.0:
-        return audio
-    return pyrb.time_stretch(audio.astype(np.float32), sr, rate=tempo)
+def extract_part_num(url: str) -> int:
+    m = re.search(r"Part_(\d+)_", url)
+    if not m:
+        raise ValueError(f"Part 번호를 파일명에서 찾을 수 없음: {url}")
+    return int(m.group(1))
+
+
+def merge_chunks(chunk_urls: list, silence_gap: float = 0.5):
+    if not chunk_urls:
+        raise ValueError("chunk_urls가 비어 있습니다.")
+
+    sorted_urls = sorted(chunk_urls, key=extract_part_num)
+
+    segments = []
+    sr_ref = None
+    for url in sorted_urls:
+        path = get_reference_audio(url)
+        audio, sr = sf.read(path)
+        if sr_ref is None:
+            sr_ref = sr
+        elif sr != sr_ref:
+            raise ValueError(f"샘플레이트 불일치: {url} ({sr} != {sr_ref})")
+        segments.append(audio)
+
+    gap = np.zeros(int(silence_gap * sr_ref), dtype=segments[0].dtype)
+    merged = segments[0]
+    for seg in segments[1:]:
+        merged = np.concatenate([merged, gap, seg])
+
+    return merged, sr_ref
 
 
 def generate_audio(job):
     req = job["input"]
+    mode = req.get("mode", "voice_clone")
 
+    # ─────────────────────────────────────────────
+    # MODE: merge — 청크 오디오 병합
+    # ─────────────────────────────────────────────
+    if mode == "merge":
+        chunk_urls = req.get("chunk_urls", [])
+        silence_gap = float(req.get("silence_gap", 0.5))
+        print(f"📥 [작업 수신] 병합 모드 / 청크 수={len(chunk_urls)} / silence_gap={silence_gap}s")
+
+        try:
+            merged_audio, sr = merge_chunks(chunk_urls, silence_gap)
+
+            # 최종 병합본 전체 피크 정규화 — 청크별 음량 편차 해소
+            merged_audio = normalize_audio(merged_audio)
+
+            buffer = io.BytesIO()
+            sf.write(buffer, merged_audio, sr, format="WAV")
+            buffer.seek(0)
+            audio_base64 = base64.b64encode(buffer.read()).decode("utf-8")
+
+            print("✨ 병합 및 Base64 변환 성공!")
+            return {
+                "status": "success",
+                "message": "청크 병합 완료!",
+                "audio_base64": audio_base64
+            }
+
+        except Exception as e:
+            print(f"❌ 병합 중 에러 발생: {e}")
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    # ─────────────────────────────────────────────
+    # MODE: voice_clone (기본값) — tempo 기능 제거, 원본 속도 고정
+    # ─────────────────────────────────────────────
     text                  = req.get("text", "")
     reference_text        = req.get("reference_text", "")
     reference_audio_url   = req.get("reference_audio", "")
     language              = req.get("language", "auto")
-    tempo                 = float(req.get("tempo", 1.0))
 
-    print(f"📥 [작업 수신] 대본: {text[:30]}... / tempo={tempo}")
+    print(f"📥 [작업 수신] 대본: {text[:30]}...")
 
     try:
         # ─────────────────────────────────────────────
@@ -100,15 +160,8 @@ def generate_audio(job):
             ref_text=reference_text
         )
 
-        audio = wavs[0]
-
-        # 배속 조정 (정규화보다 먼저 적용 — 스트레치 후 피크가 달라질 수 있으므로)
-        if tempo != 1.0:
-            print(f"🎚️ 배속 조정 적용 (Rubber Band): rate={tempo}")
-            audio = apply_tempo(audio, sr, tempo)
-
         # 정규화 → Base64 인코딩
-        normalized = normalize_audio(audio)
+        normalized = normalize_audio(wavs[0])
 
         buffer = io.BytesIO()
         sf.write(buffer, normalized, sr, format="WAV")
