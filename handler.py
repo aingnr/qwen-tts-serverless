@@ -54,6 +54,23 @@ def normalize_audio(audio: np.ndarray) -> np.ndarray:
 
 
 # ─────────────────────────────────────────────
+# [FIX 6] Fade In/Out
+# 청크 시작/끝 지점의 파형 불연속(클릭/팝 노이즈) 방지.
+# 무음을 붙이기 전 반드시 이 함수를 먼저 적용한다.
+# ─────────────────────────────────────────────
+def apply_fade(audio: np.ndarray, sr: int, fade_ms: int = 8) -> np.ndarray:
+    fade_len = int(sr * fade_ms / 1000)
+    if fade_len <= 0 or len(audio) < fade_len * 2:
+        return audio
+    audio = audio.copy()
+    fade_in = np.linspace(0.0, 1.0, fade_len, dtype=audio.dtype)
+    fade_out = np.linspace(1.0, 0.0, fade_len, dtype=audio.dtype)
+    audio[:fade_len] *= fade_in
+    audio[-fade_len:] *= fade_out
+    return audio
+
+
+# ─────────────────────────────────────────────
 # [FIX 5] 청크 오디오 병합 (Merge)
 # Part_N_[ID].wav "파일명"에서 숫자를 추출해 정렬 후,
 # silence_gap(초) 만큼 무음을 사이에 넣어 이어붙임.
@@ -142,8 +159,9 @@ def generate_audio(job):
     reference_text        = req.get("reference_text", "")
     reference_audio_url   = req.get("reference_audio", "")
     language              = req.get("language", "auto")
+    chunk_gap             = float(req.get("chunk_gap", 0.4))
 
-    print(f"📥 [작업 수신] 대본: {text[:30]}...")
+    print(f"📥 [작업 수신] 대본: {text[:30]}... / chunk_gap={chunk_gap}s")
 
     try:
         # ─────────────────────────────────────────────
@@ -167,8 +185,13 @@ def generate_audio(job):
             ref_text=reference_text
         )
 
-        # 정규화 → Base64 인코딩
+        # 정규화 → Fade In/Out(클릭 노이즈 방지) → 끝에 무음 삽입
         normalized = normalize_audio(wavs[0])
+        normalized = apply_fade(normalized, sr)
+
+        if chunk_gap > 0:
+            silence = np.zeros(int(chunk_gap * sr), dtype=normalized.dtype)
+            normalized = np.concatenate([normalized, silence])
 
         buffer = io.BytesIO()
         sf.write(buffer, normalized, sr, format="WAV")
