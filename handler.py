@@ -160,18 +160,19 @@ def generate_audio(job):
     reference_audio_url   = req.get("reference_audio", "")
     language              = req.get("language", "auto")
     chunk_gap             = float(req.get("chunk_gap", 0.4))
+    seed                  = int(req.get("seed", 42))
 
-    print(f"📥 [작업 수신] 대본: {text[:30]}... / chunk_gap={chunk_gap}s")
+    print(f"📥 [작업 수신] 대본: {text[:30]}... / chunk_gap={chunk_gap}s / seed={seed}")
 
     try:
         # ─────────────────────────────────────────────
-        # [FIX 3] Seed 고정 — 매 청크 추론 전에 항상 동일한 시드 세팅
-        # → 샘플링 랜덤성을 제거하여 청크 간 톤·속도·억양 일관성 확보
+        # [FIX 3] Seed — 기본 42 (최초 생성, 톤 일관성 유지)
+        # → 재시도 시 n8n이 랜덤 시드를 보내면 그 값을 그대로 사용,
+        #   같은 텍스트에서 반복적으로 같은 불량 결과가 재현되는 문제 방지
         # ─────────────────────────────────────────────
-        FIXED_SEED = 42
-        torch.manual_seed(FIXED_SEED)
+        torch.manual_seed(seed)
         if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(FIXED_SEED)
+            torch.cuda.manual_seed_all(seed)
 
         # 레퍼런스 오디오: 캐시에서 가져오기 (최초 1회만 다운로드)
         prompt_audio_path = get_reference_audio(reference_audio_url)
