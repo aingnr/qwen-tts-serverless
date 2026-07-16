@@ -6,13 +6,22 @@ import io
 import torch
 import numpy as np
 import soundfile as sf
+from huggingface_hub import snapshot_download
 from qwen_tts import Qwen3TTSModel
 import traceback
 
 print("🚀 [Cold Start] Qwen3-TTS 모델 로딩 중...")
 
+MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+
+# 이미 Docker 이미지 빌드 타임에 캐싱되어 있으므로, 네트워크 호출 없이
+# 로컬 캐시 경로만 즉시 반환됨. 이 경로를 from_pretrained에 넘기면
+# transformers 내부의 "저장소 ID 문자열일 때만 네트워크를 타는" 버그
+# 지점(_patch_mistral_regex → is_base_mistral)을 완전히 우회한다.
+local_model_path = snapshot_download(MODEL_ID, local_files_only=True)
+
 model = Qwen3TTSModel.from_pretrained(
-    "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    local_model_path,
     device_map="cuda:0",
     dtype=torch.bfloat16,
     attn_implementation="sdpa",
